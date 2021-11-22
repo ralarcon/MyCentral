@@ -1,4 +1,5 @@
-﻿@inject IServiceClient Client
+﻿@using System.Reactive.Linq
+@inject IServiceClient Client
 @implements IDisposable
 
 @if (_events is not null)
@@ -40,12 +41,27 @@
     public string? DeviceId { get; set; }
 
     private ObservableList<Event>? _events;
+    private string? _deviceId = String.Empty;
 
     protected override void OnInitialized()
     {
-        if (DeviceId is string deviceId)
+        InitializeEventList(DeviceId);
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (_deviceId != DeviceId)
         {
-            _events = new ObservableList<Event>(Client.ObserveEventsFor(DeviceId), StateHasChanged);
+            InitializeEventList(DeviceId);
+        }
+    }
+
+    private void InitializeEventList(string? deviceId)
+    {
+        _deviceId = deviceId;
+        if (!String.IsNullOrWhiteSpace(deviceId))
+        {
+            _events = new ObservableList<Event>(Client.ObserveEventsFor(deviceId), StateHasChanged);
         }
         else
         {

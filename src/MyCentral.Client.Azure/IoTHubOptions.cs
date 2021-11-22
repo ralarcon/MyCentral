@@ -9,5 +9,11 @@ namespace MyCentral.Client.Azure
 
         [Required]
         public string HostName { get; set; } = null!;
+
+        [Required]
+        public string BlobStorageConnectionString { get; set; } = null!;
+
+        [Required]
+        public string BlobContainerName { get; set; } = null!;
     }
 }

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -30,44 +31,54 @@ namespace MyCentral.Client.Azure
             _options = options.Value;
             _logger = logger;
 
-            Events = new AzureEventClient(_options.EventHubConnectionString);
+            Events = new AzureEventClient(_options.EventHubConnectionString, _options.BlobStorageConnectionString, _options.BlobContainerName);
             _client = ServiceClient.Create(_options.HostName, credential);
             _registry = RegistryManager.Create(_options.HostName, credential);
         }
 
         public async Task<string> InvokeMethodAsync(string deviceId, string methodName, string? payload = null)
         {
-            var method = new CloudToDeviceMethod(methodName);
-
-            if (payload is not null)
+            try
             {
-                method.SetPayloadJson(payload);
+                var method = new CloudToDeviceMethod(methodName);
+
+                if (payload is not null)
+                {
+                    method.SetPayloadJson(payload);
+                }
+
+                var result = await _client.InvokeDeviceMethodAsync(deviceId, method);
+
+                return result.GetPayloadAsJson();
             }
-
-            var result = await _client.InvokeDeviceMethodAsync(deviceId, method);
-
-            return result.GetPayloadAsJson();
+            catch(Exception ex)
+            {
+                return  await Task.FromResult<string>($"{{ \"Error\":\"Not Executed. Error: {ex.Message}}}\"");
+            }
         }
 
         public ValueTask DisposeAsync()
         {
-            _client.Dispose();
-            _registry.Dispose();
+            //_client.Dispose();
+            //_registry.Dispose();
 
             return new ValueTask();
         }
 
         public async IAsyncEnumerable<string> GetDevicesAsync([EnumeratorCancellation] CancellationToken token)
         {
-            var query = _registry.CreateQuery(@"select deviceId,
+            var query = _registry.CreateQuery(@$"select deviceId,
                               lastActivityTime,
                               connectionState,
                               status,
                               properties.reported.[[$iotin:deviceinfo]].manufacturer.value as manufacturer
                        from devices
-                       where capabilities.iotEdge != true");
+                       where capabilities.iotEdge != true and lastActivityTime >= '{DateTime.UtcNow.Subtract(TimeSpan.FromHours(720)).ToString("yyyy-MM-ddThh:mm:ss")}'", 100);
 
-            while (query.HasMoreResults)
+            var devicesCount = 0;
+            var pages = 0;
+
+            while (query.HasMoreResults && pages < 10)
             {
                 var result = default(IEnumerable<string>);
 
@@ -91,10 +102,14 @@ namespace MyCentral.Client.Azure
 
                     if (twin.deviceId is not null)
                     {
+                        devicesCount++;
                         yield return twin.deviceId;
                     }
                 }
+                pages++;
             }
+            Debug.WriteLine($"Gathered {devicesCount} devices.");
+            Debug.WriteLine($"Scanned {pages} result pages.");
         }
 
         public async Task UpdatePropertyAsync(string deviceId, string componentName, string propertyName, string propertyValue)
